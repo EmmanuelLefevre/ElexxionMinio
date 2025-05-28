@@ -1,0 +1,148 @@
+services:
+  minio:
+    image: minio/minio
+    container_name: minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_NOTIFY_WEBHOOK_ENABLE_webhook: ${MINIO_NOTIFY_WEBHOOK_ENABLE_webhook}
+      MINIO_NOTIFY_WEBHOOK_ENDPOINT_webhook: ${MINIO_NOTIFY_WEBHOOK_ENDPOINT_webhook}
+    env_file:
+      - .env
+    command: minio server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 30s
+    networks:
+      - my_network
+
+  init:
+    build:
+      context: .
+      dockerfile: Dockerfile.init
+    container_name: init
+    volumes:
+      - ./scripts:/app/scripts
+    working_dir: /app/scripts
+    command: python init.py
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_BUCKET: ${MINIO_BUCKET}
+    env_file:
+      - .env
+    networks:
+      - my_network
+
+  webhook:
+    build:
+      context: .
+      dockerfile: Dockerfile.webhook
+    container_name: webhook
+    hostname: webhook
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./scripts:/app/scripts
+    depends_on:
+      - minio
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT}
+      MINIO_BUCKET: ${MINIO_BUCKET}
+    command: uvicorn scripts.webhook:app --host 0.0.0.0 --port 8000 --reload
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 30s
+    networks:
+      - my_network
+
+  minio_client:
+    image: minio/mc
+    container_name: minio_client
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    entrypoint: >
+      /bin/sh -c "
+      sleep 15;
+      mc alias set minio http://minio:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD} &&
+      mc event add minio/elexxion-minio-bucket arn:minio:sqs::webhook:webhook --event put &&
+      tail -f /dev/null
+      "
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_BUCKET: ${MINIO_BUCKET}
+    networks:
+      - my_network
+    env_file:
+      - .env
+
+  ##########       Ne décommenter que pour tester le service     ##########
+  ########## Déposer MANUELLEMENT un seul fichier dans le bucket ##########
+  ##########              Génère des coûts réels !!!             ##########
+  # webhook_aws:
+  #   image: minio/mc
+  #   container_name: webhook_aws
+  #   depends_on:
+  #     minio:
+  #       condition: service_healthy
+  #   env_file:
+  #     - .env
+  #   environment:
+  #     MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+  #     MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+  #     AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+  #     AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+  #     MINIO_BUCKET: ${MINIO_BUCKET}
+  #   volumes:
+  #     - ./scripts:/app/scripts
+  #   entrypoint: >
+  #     /bin/sh -c "/app/scripts/aws_sync.sh"
+  #   networks:
+  #     - my_network
+
+  scrapper:
+    build:
+      context: .
+      dockerfile: Dockerfile.scrapper
+    container_name: scrapper
+    depends_on:
+      minio_client:
+        condition: service_completed_successfully
+    command: python /app/scripts/scrapper.py
+    environment:
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_BUCKET: ${MINIO_BUCKET}
+    env_file:
+      - .env
+    volumes:
+      - ./scripts:/app/scripts
+    networks:
+      - my_network
+
+volumes:
+  minio_data:
+
+networks:
+  my_network:
+    driver: bridge

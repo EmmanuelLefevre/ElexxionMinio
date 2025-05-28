@@ -1,0 +1,44 @@
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# dotenv
+.env
+
+.vscode/
+.idea/
+
+.DS_Store
+.idea
+
+# MinIO-related
+data/
+*.parquet
+*.csv
+*.log
+
+# Minio client configuration
+mc-config/
+
+# Files
+__pycache__/
+.vscode/
+.idea/
+.idea
+.DS_Store
+*.py[cod]
+*$py.class
+notebooks/mlruns
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# MinIO
+data/
+*.parquet
+*.csv
+*.log
+mc-config/
