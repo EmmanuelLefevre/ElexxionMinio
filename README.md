@@ -120,3 +120,5 @@ docker compose up --build
 ## ✅ TO DO
 
 - Intégration d’un modèle LightGBM avec tuning Optuna (étape de modélisation)
+
+GGWP
